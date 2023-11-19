@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:http/http.dart';
 import 'package:image_downloader/helpers/locator.dart';
 import 'package:image_downloader/model/image-item-model.dart';
 import 'package:image_downloader/service/image-service.dart';
@@ -20,9 +21,20 @@ class ImageViewModel extends ChangeNotifier{
         return true;
       }
     }catch(e){
-      print('error fetching books $e');
+      print('error fetching images $e');
     }
     return false;
+  }
+
+  Future<Response?> getImagesBytes(String imageUrl) async {
+    try{
+      Response? imageByteResponse = await imageService.getImageBytes(imageUrl);
+        print(imageByteResponse.bodyBytes);
+        return imageByteResponse;
+    }catch(e){
+      print('$e');
+    }
+    return null;
   }
 
 

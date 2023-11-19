@@ -1,4 +1,7 @@
+import 'dart:isolate';
+
 import 'package:flutter/material.dart';
+import 'package:image_downloader/view/download-image-page.dart';
 import 'package:image_downloader/viewmodel/image-viewmodel.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -7,6 +10,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'helpers/locator.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   setUpLocator();
   runApp(
       MultiProvider(
@@ -192,8 +196,14 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
           ),
           pickedImage.isNotEmpty ? ElevatedButton(
-              onPressed: (){
-
+              onPressed: () async {
+                // var imageString = await imageViewModel.getImagesBytes('${imageViewModel.imagesList[0].downloadUrl}.jpg');
+                // print(imageString?.bodyBytes);
+                // Isolate.spawn(, message)
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (builder) => DownloadImage(pickedImageIds: pickedImage))
+                );
               },
               child: Text(
                 'Download'
