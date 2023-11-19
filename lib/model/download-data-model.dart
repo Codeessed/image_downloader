@@ -12,6 +12,18 @@ class DownloadDataModel {
     required this.loading,
   });
 
+  DownloadDataModel copyWith({
+    Uint8List? image,
+    String? error,
+    bool? loading,
+  }) {
+    return DownloadDataModel(
+      image: image?? this.image,
+      error: error?? this.error,
+      loading: loading?? this.loading
+    );
+  }
+
   Map toJson() {
     return {
       "image": image,
