@@ -27,7 +27,9 @@ class _ImageDownloadState extends State<ImageDownload> {
       : Column(
         children: [
           Expanded(
-            child: widget.downloadData.image != null ? Image.memory(widget.downloadData.image!) : Container()
+            child: widget.downloadData.imageBytes != null ?
+            widget.downloadData.processImageBytes != null ? Image.memory(widget.downloadData.processImageBytes!)
+                :Image.memory(widget.downloadData.imageBytes!) : Container()
           ),
           Text(
               '${widget.downloadData.error}'
