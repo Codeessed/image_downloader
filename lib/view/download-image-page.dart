@@ -96,7 +96,7 @@ class _DownloadImageState extends State<DownloadImage> {
     );
 
     for(var i = 0; i < pickedImageList.length; i++){
-      spawnDownloadIsolate(i, downloadData[i], viewModel);
+      spawnDownloadIsolate(i, downloadData[i]);
     }
 
 
@@ -113,7 +113,7 @@ class _DownloadImageState extends State<DownloadImage> {
       var downloadItemIndex = pickedImageList.indexWhere((element) =>
       element.downloadUrl == retryDownloadItem.imageUrl
       );
-      spawnDownloadIsolate(downloadItemIndex, DownloadDataModel(imageUrl: retryDownloadItem.imageUrl, error: null, loading: true, imageBytes: null, processImageBytes: null), imageViewModel);
+      spawnDownloadIsolate(downloadItemIndex, DownloadDataModel(imageUrl: retryDownloadItem.imageUrl, error: null, loading: true, imageBytes: null, processImageBytes: null),);
       imageViewModel.retryImageDownload(null);
     }
 
@@ -122,7 +122,7 @@ class _DownloadImageState extends State<DownloadImage> {
       var preprocessItemIndex = pickedImageList.indexWhere((element) =>
       element.downloadUrl == retryPreprocessItem.imageUrl
       );
-      spawnProcessIsolate(preprocessItemIndex, downloadData[preprocessItemIndex].copyWith(loading: true), imageViewModel);
+      spawnProcessIsolate(preprocessItemIndex, downloadData[preprocessItemIndex].copyWith(loading: true),);
       imageViewModel.retryPreprocessing(null);
     }
 
@@ -201,7 +201,7 @@ class _DownloadImageState extends State<DownloadImage> {
   }
 
 
-  Future<void> spawnDownloadIsolate(int downloadIndex, DownloadDataModel initialDataModel, ImageViewModel imageViewModel) async {
+  Future<void> spawnDownloadIsolate(int downloadIndex, DownloadDataModel initialDataModel) async {
     final receivePort = ReceivePort();
     final sendPort = receivePort.sendPort;
     DownloadDataModel? downloadDataModel;
@@ -223,7 +223,7 @@ class _DownloadImageState extends State<DownloadImage> {
             downloadData[downloadIndex] = downloadData[downloadIndex].copyWith(loading: true);
             downloadPagesList[downloadIndex] = ImageDownload(downloadData: downloadData[downloadIndex]);
           });
-          spawnProcessIsolate(downloadIndex, downloadData[downloadIndex], imageViewModel);
+          spawnProcessIsolate(downloadIndex, downloadData[downloadIndex]);
         }
 
       }
@@ -249,7 +249,7 @@ class _DownloadImageState extends State<DownloadImage> {
   }
 
 
-  Future<void> spawnProcessIsolate(int downloadIndex, DownloadDataModel initialDataModel, ImageViewModel imageViewModel) async {
+  Future<void> spawnProcessIsolate(int downloadIndex, DownloadDataModel initialDataModel) async {
     final receivePort = ReceivePort();
     final sendPort = receivePort.sendPort;
     DownloadDataModel? downloadDataModel;
@@ -257,10 +257,6 @@ class _DownloadImageState extends State<DownloadImage> {
     receivePort.listen((message) {
       if (message is Map<dynamic, dynamic>) {
         downloadDataModel = DownloadDataModel.fromJson(message);
-        List<DownloadDataModel> downloads = imageViewModel.downloadImagesList;
-        downloads.add(downloadDataModel!);
-        print(downloads.length);
-        imageViewModel.updateDownloadImageList(downloads);
       } else {
         downloadDataModel = initialDataModel.copyWith(error: 'An error has occurred', loading: false);
       }
