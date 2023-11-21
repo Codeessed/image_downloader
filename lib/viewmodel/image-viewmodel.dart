@@ -11,8 +11,14 @@ class ImageViewModel extends ChangeNotifier{
   final List<ImageItemModel> _imagesList = [];
   List<ImageItemModel> get imagesList => _imagesList;
 
+  final List<DownloadDataModel> _downloadImagesList = [];
+  List<DownloadDataModel> get downloadImagesList => _downloadImagesList;
+
   DownloadDataModel? _retryDownload;
   DownloadDataModel? get retryDownload => _retryDownload;
+
+  DownloadDataModel? _retryPreprocess;
+  DownloadDataModel? get retryPreprocess => _retryPreprocess;
 
   String _error = '';
   String get error => _error;
@@ -51,10 +57,19 @@ class ImageViewModel extends ChangeNotifier{
     return null;
   }
 
-  void retryImageDownload(DownloadDataModel downloadDataModel){
+  void retryImageDownload(DownloadDataModel? downloadDataModel){
     _retryDownload = downloadDataModel;
     notifyListeners();
-    _retryDownload = null;
+  }
+
+  void retryPreprocessing(DownloadDataModel? downloadDataModel){
+    _retryPreprocess = downloadDataModel;
+    notifyListeners();
+  }
+
+  void updateDownloadImageList(List<DownloadDataModel> downloadedImages){
+    _downloadImagesList.clear();
+    _downloadImagesList.addAll(downloadedImages);
     notifyListeners();
   }
 

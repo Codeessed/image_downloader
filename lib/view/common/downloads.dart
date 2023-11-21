@@ -3,6 +3,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:image_downloader/model/download-data-model.dart';
 import 'package:image_downloader/view/common/width-spacer.dart';
+import 'package:image_downloader/viewmodel/image-viewmodel.dart';
+import 'package:provider/provider.dart';
 
 class ImageDownload extends StatefulWidget{
 
@@ -18,16 +20,20 @@ class ImageDownload extends StatefulWidget{
 }
 
 class _ImageDownloadState extends State<ImageDownload> {
+
   @override
   Widget build(BuildContext context) {
 
+    ImageViewModel imageViewModel = context.watch<ImageViewModel>();
+
     print('image byte${widget.downloadData.imageBytes}');
     print('process image byte ${widget.downloadData.processImageBytes}');
-    return imageWidget(downloadDataModel: widget.downloadData);
+    return imageWidget(downloadDataModel: widget.downloadData, viewModel: imageViewModel);
   }
 
   Widget imageWidget({
-    required DownloadDataModel downloadDataModel
+    required DownloadDataModel downloadDataModel,
+    required ImageViewModel viewModel,
 }){
     Widget? mainWidget;
     if(downloadDataModel.loading){
@@ -40,9 +46,13 @@ class _ImageDownloadState extends State<ImageDownload> {
           children: [
             IntrinsicHeight(
               child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Spacer(),
-                  CircularProgressIndicator(),
+                  Container(
+                      child: CircularProgressIndicator(),
+                    height: 20,
+                    width: 20,
+                  ),
                   WidthSpacer(0.03),
                   Text(
                     'Rotating and grayscaling image',
@@ -69,7 +79,7 @@ class _ImageDownloadState extends State<ImageDownload> {
               ),
               TextButton(
                   onPressed: (){
-
+                    viewModel.retryImageDownload(widget.downloadData);
                   },
                   child: Text(
                       'Retry Download'
@@ -81,12 +91,12 @@ class _ImageDownloadState extends State<ImageDownload> {
           mainWidget = Column(
             children: [
               Text(
-                'Image preprocessing failed.',
+                'Image preprocessing failed ${widget.downloadData.error}.',
                 textAlign: TextAlign.center,
               ),
               TextButton(
                   onPressed: (){
-
+                    viewModel.retryPreprocessing(widget.downloadData);
                   },
                   child: Text(
                     'Try Again',
@@ -99,6 +109,9 @@ class _ImageDownloadState extends State<ImageDownload> {
           );
         }
       }else{
+        List<DownloadDataModel> downloads = viewModel.downloadImagesList;
+        downloads.add(downloadDataModel);
+        viewModel.updateDownloadImageList(downloads);
         mainWidget = Image.memory(downloadDataModel.processImageBytes!);
       }
     }
