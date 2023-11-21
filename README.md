@@ -13,10 +13,10 @@ The following are need to run the applcation.
 - [Android Studio](https://developer.android.com/studio/install)
 
 ## Installation
-To get started, follow these installation instructions.
+To get started, follow these installation instructions:
 
 <!-- Clone the repository -->
-git clone https://github.com/your-username/your-repo.git
+git clone https://github.com/Codeessed/image_downloader.git
 
 <!-- Navigate to the project directory -->
 cd your-repo
