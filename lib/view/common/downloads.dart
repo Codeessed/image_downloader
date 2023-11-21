@@ -109,9 +109,6 @@ class _ImageDownloadState extends State<ImageDownload> {
           );
         }
       }else{
-        List<DownloadDataModel> downloads = viewModel.downloadImagesList;
-        downloads.add(downloadDataModel);
-        viewModel.updateDownloadImageList(downloads);
         mainWidget = Image.memory(downloadDataModel.processImageBytes!);
       }
     }

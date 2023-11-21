@@ -21,7 +21,6 @@ import 'common/height-spacer.dart';
   DownloadDataModel? downloadDataModel;
   String error = '';
   Uint8List? imageBytes;
-  // BackgroundIsolateBinaryMessenger.ensureInitialized(rootIsolateToken!);
   try{
     http.Response response = await ImageService().getImageBytes(imageUrl);
     imageBytes = response.bodyBytes;
@@ -29,7 +28,6 @@ import 'common/height-spacer.dart';
     downloadDataModel = initialDataModel.copyWith(imageBytes: imageBytes, loading: false);
   }catch(e){
     error = e.toString();
-    print(error);
     status = false;
     downloadDataModel = initialDataModel.copyWith(error: error, loading: false);
   }
@@ -53,11 +51,9 @@ import 'common/height-spacer.dart';
     image = img.grayscale(image);
     processImageBytes = Uint8List.fromList(img.encodeJpg(image));
     status = true;
-    print('in process ${initialDataModel.imageBytes}');
     downloadDataModel = initialDataModel.copyWith(processImageBytes: processImageBytes, loading: false);
   }catch(e){
     error = e.toString();
-    print(error);
     status = false;
     downloadDataModel = initialDataModel.copyWith(error: error, loading: false);
   }
@@ -100,7 +96,7 @@ class _DownloadImageState extends State<DownloadImage> {
     );
 
     for(var i = 0; i < pickedImageList.length; i++){
-      spawnDownloadIsolate(i, downloadData[i]);
+      spawnDownloadIsolate(i, downloadData[i], viewModel);
     }
 
 
@@ -112,15 +108,12 @@ class _DownloadImageState extends State<DownloadImage> {
 
     ImageViewModel imageViewModel = context.watch<ImageViewModel>();
 
-    Size size = MediaQuery.of(context).size;
-    var screenHeight = size.height;
-
     if(imageViewModel.retryDownload != null){
       var retryDownloadItem = imageViewModel.retryDownload!;
       var downloadItemIndex = pickedImageList.indexWhere((element) =>
       element.downloadUrl == retryDownloadItem.imageUrl
       );
-      spawnDownloadIsolate(downloadItemIndex, DownloadDataModel(imageUrl: retryDownloadItem.imageUrl, error: null, loading: true, imageBytes: null, processImageBytes: null));
+      spawnDownloadIsolate(downloadItemIndex, DownloadDataModel(imageUrl: retryDownloadItem.imageUrl, error: null, loading: true, imageBytes: null, processImageBytes: null), imageViewModel);
       imageViewModel.retryImageDownload(null);
     }
 
@@ -129,7 +122,7 @@ class _DownloadImageState extends State<DownloadImage> {
       var preprocessItemIndex = pickedImageList.indexWhere((element) =>
       element.downloadUrl == retryPreprocessItem.imageUrl
       );
-      spawnProcessIsolate(preprocessItemIndex, downloadData[preprocessItemIndex].copyWith(loading: true));
+      spawnProcessIsolate(preprocessItemIndex, downloadData[preprocessItemIndex].copyWith(loading: true), imageViewModel);
       imageViewModel.retryPreprocessing(null);
     }
 
@@ -208,7 +201,7 @@ class _DownloadImageState extends State<DownloadImage> {
   }
 
 
-  Future<void> spawnDownloadIsolate(int downloadIndex, DownloadDataModel initialDataModel) async {
+  Future<void> spawnDownloadIsolate(int downloadIndex, DownloadDataModel initialDataModel, ImageViewModel imageViewModel) async {
     final receivePort = ReceivePort();
     final sendPort = receivePort.sendPort;
     DownloadDataModel? downloadDataModel;
@@ -216,10 +209,8 @@ class _DownloadImageState extends State<DownloadImage> {
     receivePort.listen((message) {
       if (message is Map<dynamic, dynamic>) {
         downloadDataModel = DownloadDataModel.fromJson(message);
-        print(message);
       } else {
         downloadDataModel = initialDataModel.copyWith(error: 'An error has occurred', loading: false);
-        print(message);
       }
 
       if (mounted) {
@@ -232,7 +223,7 @@ class _DownloadImageState extends State<DownloadImage> {
             downloadData[downloadIndex] = downloadData[downloadIndex].copyWith(loading: true);
             downloadPagesList[downloadIndex] = ImageDownload(downloadData: downloadData[downloadIndex]);
           });
-          spawnProcessIsolate(downloadIndex, downloadData[downloadIndex]);
+          spawnProcessIsolate(downloadIndex, downloadData[downloadIndex], imageViewModel);
         }
 
       }
@@ -247,8 +238,6 @@ class _DownloadImageState extends State<DownloadImage> {
         onExit: receivePort.sendPort,
       );
     } catch (e) {
-      // Handle isolate spawn error
-      print('Error spawning isolate: $e');
       downloadDataModel = initialDataModel.copyWith(error: 'Error spawning isolate $e', loading: false);
       if (mounted) {
         setState(() {
@@ -260,7 +249,7 @@ class _DownloadImageState extends State<DownloadImage> {
   }
 
 
-  Future<void> spawnProcessIsolate(int downloadIndex, DownloadDataModel initialDataModel) async {
+  Future<void> spawnProcessIsolate(int downloadIndex, DownloadDataModel initialDataModel, ImageViewModel imageViewModel) async {
     final receivePort = ReceivePort();
     final sendPort = receivePort.sendPort;
     DownloadDataModel? downloadDataModel;
@@ -268,17 +257,19 @@ class _DownloadImageState extends State<DownloadImage> {
     receivePort.listen((message) {
       if (message is Map<dynamic, dynamic>) {
         downloadDataModel = DownloadDataModel.fromJson(message);
-        print('finished process ${downloadDataModel!.imageBytes}');
-        print(message);
+        List<DownloadDataModel> downloads = imageViewModel.downloadImagesList;
+        downloads.add(downloadDataModel!);
+        print(downloads.length);
+        imageViewModel.updateDownloadImageList(downloads);
       } else {
         downloadDataModel = initialDataModel.copyWith(error: 'An error has occurred', loading: false);
-        print(message);
       }
       if (mounted) {
         setState(() {
           downloadData[downloadIndex] = downloadDataModel!;
           downloadPagesList[downloadIndex] = ImageDownload(downloadData: downloadData[downloadIndex]);
         });
+
       }
       receivePort.close();
     });
@@ -291,8 +282,6 @@ class _DownloadImageState extends State<DownloadImage> {
         onExit: receivePort.sendPort,
       );
     } catch (e) {
-      // Handle isolate spawn error
-      print('Error spawning isolate: $e');
       downloadDataModel = initialDataModel.copyWith(error: 'Error spawning isolate', loading: false);
       if (mounted) {
         setState(() {
