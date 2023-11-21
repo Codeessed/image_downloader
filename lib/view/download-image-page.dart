@@ -3,36 +3,57 @@ import 'dart:async';
 import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart';
-import 'package:image_downloader/helpers/locator.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_downloader/model/download-data-model.dart';
 import 'package:image_downloader/model/image-item-model.dart';
 import 'package:image_downloader/service/image-service.dart';
 import 'package:image_downloader/view/common/downloads.dart';
 import 'package:image_downloader/viewmodel/image-viewmodel.dart';
+import 'package:image/image.dart' as img;
 import 'package:provider/provider.dart';
 import 'common/height-spacer.dart';
 
  Future<bool> downloadImage(List<dynamic> args) async {
-  ImageService imageService = args[0];
-  String imageUrl = args[1];
-  SendPort sendPort = args[2];
-  int imageIndex = args[3];
-  RootIsolateToken? rootIsolateToken = args[4];
-  DownloadDataModel initialDataModel = args[5];
+  SendPort sendPort = args[0];
+  DownloadDataModel initialDataModel = DownloadDataModel.fromJson(args[1]);
+  String imageUrl = initialDataModel.imageUrl!;
   bool? status;
   DownloadDataModel? downloadDataModel;
   String error = '';
   Uint8List? imageBytes;
-  BackgroundIsolateBinaryMessenger.ensureInitialized(rootIsolateToken!);
   try{
-    Response response = await imageService.getImageBytes(imageUrl);
+    http.Response response = await ImageService().getImageBytes(imageUrl);
     imageBytes = response.bodyBytes;
     status = true;
-    downloadDataModel = initialDataModel.copyWith(image: imageBytes, loading: false);
+    downloadDataModel = initialDataModel.copyWith(imageBytes: imageBytes, loading: false);
   }catch(e){
     error = e.toString();
-    print(error);
+    status = false;
+    downloadDataModel = initialDataModel.copyWith(error: error, loading: false);
+  }
+
+  sendPort.send(downloadDataModel.toJson());
+  return status;
+
+}
+
+ Future<bool> preprocessImage(List<dynamic> args) async {
+  SendPort sendPort = args[0];
+  DownloadDataModel initialDataModel = DownloadDataModel.fromJson(args[1]);
+  Uint8List bytes = initialDataModel.imageBytes!;
+  bool? status;
+  DownloadDataModel? downloadDataModel;
+  String error = '';
+  Uint8List? processImageBytes;
+  try{
+    img.Image image = img.decodeImage(bytes)!;
+    image = img.copyRotate(image, angle: 90);
+    image = img.grayscale(image);
+    processImageBytes = Uint8List.fromList(img.encodeJpg(image));
+    status = true;
+    downloadDataModel = initialDataModel.copyWith(processImageBytes: processImageBytes, loading: false);
+  }catch(e){
+    error = e.toString();
     status = false;
     downloadDataModel = initialDataModel.copyWith(error: error, loading: false);
   }
@@ -58,25 +79,24 @@ class _DownloadImageState extends State<DownloadImage> {
   int currentPageIndex = 0;
   List<Widget> downloadPagesList = [];
   List<DownloadDataModel> downloadData = [];
+  List<ImageItemModel> pickedImageList = [];
 
   final PageController _pageController = PageController();
 
   @override
   void initState() {
     super.initState();
-
-    List<ImageItemModel> pickedImageList = [];
     ImageViewModel viewModel = context.read<ImageViewModel>();
-    pickedImageList.addAll(viewModel.imagesList.where((element) => widget.pickedImageIds.contains(element.id)));
+    pickedImageList.addAll(viewModel.imagesList.where((element) => widget.pickedImageIds.contains(element .id)));
     downloadData.addAll(
-        List.generate(pickedImageList.length, (index) => DownloadDataModel(image: null, error: null, loading: true))
+        List.generate(pickedImageList.length, (index) => DownloadDataModel(imageUrl: pickedImageList[index].downloadUrl, error: null, loading: true, imageBytes: null, processImageBytes: null))
     );
     downloadPagesList.addAll(
       downloadData.map((e) => ImageDownload(downloadData: e))
     );
 
     for(var i = 0; i < pickedImageList.length; i++){
-      spawnTask(pickedImageList[i].downloadUrl, i, downloadData[i]);
+      spawnDownloadIsolate(i, downloadData[i], viewModel);
     }
 
 
@@ -88,15 +108,41 @@ class _DownloadImageState extends State<DownloadImage> {
 
     ImageViewModel imageViewModel = context.watch<ImageViewModel>();
 
-    Size size = MediaQuery.of(context).size;
-    var screenHeight = size.height;
+    if(imageViewModel.retryDownload != null){
+      var retryDownloadItem = imageViewModel.retryDownload!;
+      var downloadItemIndex = pickedImageList.indexWhere((element) =>
+      element.downloadUrl == retryDownloadItem.imageUrl
+      );
+      spawnDownloadIsolate(downloadItemIndex, DownloadDataModel(imageUrl: retryDownloadItem.imageUrl, error: null, loading: true, imageBytes: null, processImageBytes: null), imageViewModel);
+      imageViewModel.retryImageDownload(null);
+    }
+
+    if(imageViewModel.retryPreprocess != null){
+      var retryPreprocessItem = imageViewModel.retryPreprocess!;
+      var preprocessItemIndex = pickedImageList.indexWhere((element) =>
+      element.downloadUrl == retryPreprocessItem.imageUrl
+      );
+      spawnProcessIsolate(preprocessItemIndex, downloadData[preprocessItemIndex].copyWith(loading: true), imageViewModel);
+      imageViewModel.retryPreprocessing(null);
+    }
 
     return SafeArea(
       child: Scaffold(
         body: Center(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              HeightSpacer(0.05),
+              HeightSpacer(0.03),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: GestureDetector(
+                  onTap: (){
+                    Navigator.pop(context);
+                  },
+                    child: Icon(Icons.arrow_back)
+                ),
+              ),
+              HeightSpacer(0.03),
               Expanded(
                 child: PageView.builder(
                   onPageChanged: (value){
@@ -155,27 +201,16 @@ class _DownloadImageState extends State<DownloadImage> {
   }
 
 
-  Future<void> spawnTask(String imageUrl, int downloadIndex, DownloadDataModel initialDataModel) async {
+  Future<void> spawnDownloadIsolate(int downloadIndex, DownloadDataModel initialDataModel, ImageViewModel imageViewModel) async {
     final receivePort = ReceivePort();
     final sendPort = receivePort.sendPort;
     DownloadDataModel? downloadDataModel;
-    ImageService imageService = locator<ImageService>();
-    RootIsolateToken? rootIsolateToken = RootIsolateToken.instance;
-    if (rootIsolateToken == null) {
-      print("Cannot get the RootIsolateToken");
-      downloadDataModel = initialDataModel.copyWith(error: 'Cannot get the RootIsolateToken', loading: false);
-          // DownloadDataModel(image: null, error: 'Cannot get the RootIsolateToken', loading: false);
-      // return;
-    }
 
     receivePort.listen((message) {
       if (message is Map<dynamic, dynamic>) {
         downloadDataModel = DownloadDataModel.fromJson(message);
-        print(message);
       } else {
-        // Handle other types of messages if necessary
         downloadDataModel = initialDataModel.copyWith(error: 'An error has occurred', loading: false);
-        print(message);
       }
 
       if (mounted) {
@@ -183,6 +218,14 @@ class _DownloadImageState extends State<DownloadImage> {
           downloadData[downloadIndex] = downloadDataModel!;
           downloadPagesList[downloadIndex] = ImageDownload(downloadData: downloadData[downloadIndex]);
         });
+        if(downloadData[downloadIndex].imageBytes != null){
+          setState(() {
+            downloadData[downloadIndex] = downloadData[downloadIndex].copyWith(loading: true);
+            downloadPagesList[downloadIndex] = ImageDownload(downloadData: downloadData[downloadIndex]);
+          });
+          spawnProcessIsolate(downloadIndex, downloadData[downloadIndex], imageViewModel);
+        }
+
       }
       receivePort.close(); // Close the receive port to avoid memory leaks
     });
@@ -190,14 +233,12 @@ class _DownloadImageState extends State<DownloadImage> {
     try {
       await Isolate.spawn(
         downloadImage,
-        [imageService, imageUrl, sendPort, downloadIndex, rootIsolateToken, initialDataModel],
+        [sendPort, initialDataModel.toJson()],
         onError: receivePort.sendPort,
         onExit: receivePort.sendPort,
       );
     } catch (e) {
-      // Handle isolate spawn error
-      print('Error spawning isolate: $e');
-      downloadDataModel = initialDataModel.copyWith(error: 'Error spawning isolate', loading: false);
+      downloadDataModel = initialDataModel.copyWith(error: 'Error spawning isolate $e', loading: false);
       if (mounted) {
         setState(() {
           downloadData[downloadIndex] = downloadDataModel!;
@@ -208,6 +249,48 @@ class _DownloadImageState extends State<DownloadImage> {
   }
 
 
+  Future<void> spawnProcessIsolate(int downloadIndex, DownloadDataModel initialDataModel, ImageViewModel imageViewModel) async {
+    final receivePort = ReceivePort();
+    final sendPort = receivePort.sendPort;
+    DownloadDataModel? downloadDataModel;
+
+    receivePort.listen((message) {
+      if (message is Map<dynamic, dynamic>) {
+        downloadDataModel = DownloadDataModel.fromJson(message);
+        List<DownloadDataModel> downloads = imageViewModel.downloadImagesList;
+        downloads.add(downloadDataModel!);
+        print(downloads.length);
+        imageViewModel.updateDownloadImageList(downloads);
+      } else {
+        downloadDataModel = initialDataModel.copyWith(error: 'An error has occurred', loading: false);
+      }
+      if (mounted) {
+        setState(() {
+          downloadData[downloadIndex] = downloadDataModel!;
+          downloadPagesList[downloadIndex] = ImageDownload(downloadData: downloadData[downloadIndex]);
+        });
+
+      }
+      receivePort.close();
+    });
+
+    try {
+      await Isolate.spawn(
+        preprocessImage,
+        [sendPort, initialDataModel.toJson()],
+        onError: receivePort.sendPort,
+        onExit: receivePort.sendPort,
+      );
+    } catch (e) {
+      downloadDataModel = initialDataModel.copyWith(error: 'Error spawning isolate', loading: false);
+      if (mounted) {
+        setState(() {
+          downloadData[downloadIndex] = downloadDataModel!;
+          downloadPagesList[downloadIndex] = ImageDownload(downloadData: downloadData[downloadIndex]);
+        });
+      }
+    }
+  }
 
 }
 
