@@ -3,8 +3,7 @@ import 'dart:async';
 import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart';
-import 'package:image_downloader/helpers/locator.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_downloader/model/download-data-model.dart';
 import 'package:image_downloader/model/image-item-model.dart';
 import 'package:image_downloader/service/image-service.dart';
@@ -15,19 +14,19 @@ import 'package:provider/provider.dart';
 import 'common/height-spacer.dart';
 
  Future<bool> downloadImage(List<dynamic> args) async {
-  ImageService imageService = args[0];
-  String imageUrl = args[1];
-  SendPort sendPort = args[2];
-  int imageIndex = args[3];
-  RootIsolateToken? rootIsolateToken = args[4];
-  DownloadDataModel initialDataModel = DownloadDataModel.fromJson(args[5]);
+
+  String imageUrl = args[0];
+  SendPort sendPort = args[1];
+  int imageIndex = args[2];
+  // RootIsolateToken? rootIsolateToken = RootIsolateToken.instance;
+  DownloadDataModel initialDataModel = DownloadDataModel.fromJson(args[3]);
   bool? status;
   DownloadDataModel? downloadDataModel;
   String error = '';
   Uint8List? imageBytes;
-  BackgroundIsolateBinaryMessenger.ensureInitialized(rootIsolateToken!);
+  // BackgroundIsolateBinaryMessenger.ensureInitialized(rootIsolateToken!);
   try{
-    Response response = await imageService.getImageBytes(imageUrl);
+    http.Response response = await ImageService().getImageBytes(imageUrl);
     imageBytes = response.bodyBytes;
     status = true;
     downloadDataModel = initialDataModel.copyWith(imageBytes: imageBytes, loading: false);
@@ -44,22 +43,21 @@ import 'common/height-spacer.dart';
 }
 
  Future<bool> preprocessImage(List<dynamic> args) async {
-  Uint8List bytes = args[0];
-  SendPort sendPort = args[1];
-  int imageIndex = args[2];
-  RootIsolateToken? rootIsolateToken = args[3];
-  DownloadDataModel initialDataModel = args[4];
+  SendPort sendPort = args[0];
+  int imageIndex = args[1];
+  DownloadDataModel initialDataModel = DownloadDataModel.fromJson(args[2]);
+  Uint8List bytes = initialDataModel.imageBytes!;
   bool? status;
   DownloadDataModel? downloadDataModel;
   String error = '';
   Uint8List? processImageBytes;
-  BackgroundIsolateBinaryMessenger.ensureInitialized(rootIsolateToken!);
   try{
     img.Image image = img.decodeImage(bytes)!;
-    image.frameType = img.FrameType.page;
-    processImageBytes = image.buffer.asUint8List();
-    // img.BlendMode.overlay;
+    image = img.copyRotate(image, angle: 90);
+    image = img.grayscale(image);
+    processImageBytes = Uint8List.fromList(img.encodeJpg(image));
     status = true;
+    print('in process ${initialDataModel.imageBytes}');
     downloadDataModel = initialDataModel.copyWith(processImageBytes: processImageBytes, loading: false);
   }catch(e){
     error = e.toString();
@@ -89,14 +87,13 @@ class _DownloadImageState extends State<DownloadImage> {
   int currentPageIndex = 0;
   List<Widget> downloadPagesList = [];
   List<DownloadDataModel> downloadData = [];
+  List<ImageItemModel> pickedImageList = [];
 
   final PageController _pageController = PageController();
 
   @override
   void initState() {
     super.initState();
-
-    List<ImageItemModel> pickedImageList = [];
     ImageViewModel viewModel = context.read<ImageViewModel>();
     pickedImageList.addAll(viewModel.imagesList.where((element) => widget.pickedImageIds.contains(element .id)));
     downloadData.addAll(
@@ -121,6 +118,15 @@ class _DownloadImageState extends State<DownloadImage> {
 
     Size size = MediaQuery.of(context).size;
     var screenHeight = size.height;
+
+    if(imageViewModel.retryDownload != null){
+      var retryDownloadItem = imageViewModel.retryDownload!;
+      var downloadItem = pickedImageList.where((element) =>
+          element.downloadUrl == retryDownloadItem.imageUrl
+      );
+      // index not really impactful, remove when chanced
+      spawnDownloadIsolate(retryDownloadItem.imageUrl!, 500, DownloadDataModel(imageUrl: , error: null, loading: true, imageBytes: null, processImageBytes: null));
+    }
 
     return SafeArea(
       child: Scaffold(
@@ -190,14 +196,6 @@ class _DownloadImageState extends State<DownloadImage> {
     final receivePort = ReceivePort();
     final sendPort = receivePort.sendPort;
     DownloadDataModel? downloadDataModel;
-    ImageService imageService = locator<ImageService>();
-    RootIsolateToken? rootIsolateToken = RootIsolateToken.instance;
-    if (rootIsolateToken == null) {
-      print("Cannot get the RootIsolateToken");
-      downloadDataModel = initialDataModel.copyWith(error: 'Cannot get the RootIsolateToken', loading: false);
-          // DownloadDataModel(image: null, error: 'Cannot get the RootIsolateToken', loading: false);
-      // return;
-    }
 
     receivePort.listen((message) {
       if (message is Map<dynamic, dynamic>) {
@@ -215,7 +213,11 @@ class _DownloadImageState extends State<DownloadImage> {
           downloadPagesList[downloadIndex] = ImageDownload(downloadData: downloadData[downloadIndex]);
         });
         if(downloadData[downloadIndex].imageBytes != null){
-          spawnProcessIsolate(downloadData[downloadIndex].imageBytes!, downloadIndex, initialDataModel);
+          setState(() {
+            downloadData[downloadIndex] = downloadData[downloadIndex].copyWith(loading: true);
+            downloadPagesList[downloadIndex] = ImageDownload(downloadData: downloadData[downloadIndex]);
+          });
+          spawnProcessIsolate(downloadIndex, downloadData[downloadIndex]);
         }
 
       }
@@ -225,7 +227,7 @@ class _DownloadImageState extends State<DownloadImage> {
     try {
       await Isolate.spawn(
         downloadImage,
-        [imageService, imageUrl, sendPort, downloadIndex, rootIsolateToken, initialDataModel.toJson()],
+        [imageUrl, sendPort, downloadIndex, initialDataModel.toJson()],
         onError: receivePort.sendPort,
         onExit: receivePort.sendPort,
       );
@@ -243,41 +245,33 @@ class _DownloadImageState extends State<DownloadImage> {
   }
 
 
-  Future<void> spawnProcessIsolate(Uint8List imageBytes, int downloadIndex, DownloadDataModel initialDataModel) async {
+  Future<void> spawnProcessIsolate(int downloadIndex, DownloadDataModel initialDataModel) async {
     final receivePort = ReceivePort();
     final sendPort = receivePort.sendPort;
     DownloadDataModel? downloadDataModel;
-    RootIsolateToken? rootIsolateToken = RootIsolateToken.instance;
-    if (rootIsolateToken == null) {
-      print("Cannot get the RootIsolateToken");
-      downloadDataModel = initialDataModel.copyWith(error: 'Cannot get the RootIsolateToken', loading: false);
-          // DownloadDataModel(image: null, error: 'Cannot get the RootIsolateToken', loading: false);
-      // return;
-    }
 
     receivePort.listen((message) {
       if (message is Map<dynamic, dynamic>) {
         downloadDataModel = DownloadDataModel.fromJson(message);
+        print('finished process ${downloadDataModel!.imageBytes}');
         print(message);
       } else {
-        // Handle other types of messages if necessary
         downloadDataModel = initialDataModel.copyWith(error: 'An error has occurred', loading: false);
         print(message);
       }
-
       if (mounted) {
         setState(() {
           downloadData[downloadIndex] = downloadDataModel!;
           downloadPagesList[downloadIndex] = ImageDownload(downloadData: downloadData[downloadIndex]);
         });
       }
-      receivePort.close(); // Close the receive port to avoid memory leaks
+      receivePort.close();
     });
 
     try {
       await Isolate.spawn(
         preprocessImage,
-        [imageBytes, sendPort, downloadIndex, rootIsolateToken, initialDataModel],
+        [sendPort, downloadIndex, initialDataModel.toJson()],
         onError: receivePort.sendPort,
         onExit: receivePort.sendPort,
       );
@@ -293,8 +287,6 @@ class _DownloadImageState extends State<DownloadImage> {
       }
     }
   }
-
-
 
 }
 

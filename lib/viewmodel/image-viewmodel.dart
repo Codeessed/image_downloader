@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:http/http.dart';
 import 'package:image_downloader/helpers/locator.dart';
+import 'package:image_downloader/model/download-data-model.dart';
 import 'package:image_downloader/model/image-item-model.dart';
 import 'package:image_downloader/service/image-service.dart';
 
@@ -10,18 +11,31 @@ class ImageViewModel extends ChangeNotifier{
   final List<ImageItemModel> _imagesList = [];
   List<ImageItemModel> get imagesList => _imagesList;
 
+  DownloadDataModel? _retryDownload;
+  DownloadDataModel? get retryDownload => _retryDownload;
+
+  String _error = '';
+  String get error => _error;
+
+  bool _loading = false;
+  bool get loading => _loading;
+
   Future<bool> getImages() async {
+    _loading = true;
+    notifyListeners();
     try{
       List<ImageItemModel> imageResponse = await imageService.getImages();
-      if(imageResponse.isNotEmpty){
-        print(imageResponse);
-        _imagesList.clear();
-        _imagesList.addAll(imageResponse);
-        notifyListeners();
-        return true;
-      }
+      print(imageResponse);
+      _imagesList.clear();
+      _imagesList.addAll(imageResponse);
+      _loading = false;
+      _error = '';
+      notifyListeners();
+      return true;
     }catch(e){
-      print('error fetching images $e');
+      _loading = false;
+      _error = e.toString();
+      notifyListeners();
     }
     return false;
   }
@@ -36,6 +50,14 @@ class ImageViewModel extends ChangeNotifier{
     }
     return null;
   }
+
+  void retryImageDownload(DownloadDataModel downloadDataModel){
+    _retryDownload = downloadDataModel;
+    notifyListeners();
+    _retryDownload = null;
+    notifyListeners();
+  }
+
 
 
 }
